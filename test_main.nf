@@ -6,7 +6,8 @@
 
 params.verbose = false // Enable for more verbose information
 params.outDir = "${PWD}" // Path to output directory
-
+params.ampliconFile = ''
+params.regionsFile = ''
 
 /*
 ================================================================================
@@ -14,10 +15,13 @@ params.outDir = "${PWD}" // Path to output directory
 ================================================================================
 */
 
-
-
 tsvPath = ''
 if (params.sample) tsvPath = params.sample
+
+ampliconFile = ''
+regionsFile = ''
+ampliconFile = file(params.ampliconFile)
+regionsFile = file(params.regionsFile)
 
 fastqFiles = Channel.empty()
 bamFiles = Channel.empty()
@@ -41,7 +45,6 @@ referenceMap = defineReferenceMap()
 startMessage()
 
 (fastqFiles, fastqFilesforFastQC) = fastqFiles.into(2)
-
 
 if (params.verbose) fastqFiles = fastqFiles.view {
   "FASTQs to preprocess:\n\
@@ -128,11 +131,31 @@ process AddUMIs {
 
   script:
   """
-  java -Xmx10g -jar /AGeNT/LocatIt.jar -U -IB -b '/Users/viklj600/Projects/TargetSeq/48379-1504167684_Amplicons.bed' -o ${idRun}.UMI.bam ${bam} ${indexRead}
+  java -Xmx10g -jar /AGeNT/LocatIt.jar -U -IB -b ${ampliconFile} -o ${idRun}.UMI.bam ${bam} ${indexRead}
   samtools sort -o ${idRun}.UMI.sorted.bam ${idRun}.UMI.bam
   bam trimBam ${idRun}.UMI.sorted.bam ${idRun}.UMI.sorted.trimmed.bam 1
   samtools index ${idRun}.UMI.sorted.trimmed.bam
   """
+}
+
+process VariantCallingUMI {
+ tag {idPatient + "-" + idRun}
+
+publishDir "${directoryMap.VariantCallingUMI}/${idRun}", mode: 'link'
+
+input:
+  set idPatient, status, idSample, idRun, file(bam), file(bai) from trimmed_umiBAM
+  file genomeFile from Channel.value(referenceMap.genomeFile)
+
+
+output:
+  set idPatient, status, idSample, idRun, file("${idRun}.UMI.variants.vcf") into variantsUMI
+
+script:
+  """
+  samtools mpileup -f ${genomeFile} -d 100000 -A -B -q 20 -l ${regionsFile} ${bam} | java -Xmx14g -jar /VarScan2/VarScan.v2.4.3.jar mpileup2cns --min-var-freq 0.005 --min-coverage 40 --min-avg-qual 20 --variants 1 --min-reads2 5 --output-vcf 1 --strand-filter 0 > ${idRun}.UMI.variants.vcf
+  """
+
 }
 
 /*
@@ -158,7 +181,8 @@ def defineDirectoryMap() {
     'fastQC'           : "${params.outDir}/Reports/FastQC",
     'samtoolsStats'    : "${params.outDir}/Reports/SamToolsStats",
     'MapReads'         : "${params.outDir}/BAMfiles",
-    'AddUMIs'          : "${params.outDir}/BAMfiles"
+    'AddUMIs'          : "${params.outDir}/BAMfiles",
+    'VariantCallingUMI': "${params.outDir}/VCFFiles"
   ]
 }
 

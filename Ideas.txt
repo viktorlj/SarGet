@@ -6,3 +6,8 @@ Three workflows
 1. Haloplex HS
 2. Haloplex standard
 3. WES alignment
+
+VarScan2 not working, remove?
+Add Pisces instead
+https://github.com/Illumina/Pisces
+https://github.com/dotnet/core/blob/master/release-notes/download-archives/1.0.5-download.md
