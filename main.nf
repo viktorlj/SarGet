@@ -25,12 +25,29 @@ if (params.verbose) fastqFiles = fastqFiles.view {
   Files : [${it[4].fileName}, ${it[5].fileName}]"
 }
 
-if (params.verbose) bamFiles = bamFiles.view {
-  "BAMs to process:\n\
-  ID    : ${it[0]}\tStatus: ${it[1]}\tSample: ${it[2]}\n\
-  Files : [${it[3].fileName}, ${it[4].fileName}]"
+process RunFastQC {
+  tag {idPatient + "-" + idRun}
+
+  publishDir "${directoryMap.fastQC}/${idRun}", mode: 'link'
+
+  input:
+    set idPatient, status, idSample, idRun, file(fastqFile1), file(fastqFile2) from fastqFilesforFastQC
+
+  output:
+    file "*_fastqc.{zip,html}" into fastQCreport
+
+  when: step == 'mapping' && !params.noReports
+
+  script:
+  """
+  fastqc -q ${fastqFile1} ${fastqFile2}
+  """
 }
 
+if (params.verbose) fastQCreport = fastQCreport.view {
+  "FastQC report:\n\
+  Files : [${it[0].fileName}, ${it[1].fileName}]"
+}
 
 /*
 ================================================================================
@@ -52,10 +69,57 @@ def extractFastq(tsvFile) {
       def idRun      = list[4]
       def fastqFile1 = returnFile(list[5])
       def fastqFile2 = returnFile(list[6])
+      def indexFile = returnFile(list[7])
 
       checkFileExtension(fastqFile1,".fastq.gz")
       checkFileExtension(fastqFile2,".fastq.gz")
+      checkFileExtension(indexFile,".fastq.gz")
 
-      [idPatient, gender, status, idSample, idRun, fastqFile1, fastqFile2]
+      [idPatient, gender, status, idSample, idRun, fastqFile1, fastqFile2, indexFile]
     }
+}
+
+def extractGenders(channel) {
+  def genders = [:]  // an empty map
+  channel = channel.map{ it ->
+    def idPatient = it[0]
+    def gender = it[1]
+    genders[idPatient] = gender
+    [idPatient] + it[2..-1]
+  }
+  [genders, channel]
+}
+
+// Lots of work needed to add correct directories 
+
+def defineDirectoryMap() {
+  return [
+    'Aligned'     : "${params.outDir}/Preprocessing/NonRealigned",
+    'nonRecalibrated'  : "${params.outDir}/Preprocessing/NonRecalibrated",
+    'recalibrated'     : "${params.outDir}/Preprocessing/Recalibrated",
+    'bamQC'            : "${params.outDir}/Reports/bamQC",
+    'bcftoolsStats'    : "${params.outDir}/Reports/BCFToolsStats",
+    'fastQC'           : "${params.outDir}/Reports/FastQC",
+    'markDuplicatesQC' : "${params.outDir}/Reports/MarkDuplicates",
+    'samtoolsStats'    : "${params.outDir}/Reports/SamToolsStats"
+  ]
+}
+
+def defineReferenceMap() {
+  if (!(params.genome in params.genomes)) exit 1, "Genome ${params.genome} not found in configuration"
+  return [
+    // genome reference dictionary
+    'genomeDict'       : checkParamReturnFile("genomeDict"),
+    // FASTA genome reference
+    'genomeFile'       : checkParamReturnFile("genomeFile"),
+    // genome .fai file
+    'genomeIndex'      : checkParamReturnFile("genomeIndex"),
+    // BWA index files
+    'bwaIndex'         : checkParamReturnFile("bwaIndex"),
+  ]
+}
+
+def checkFileExtension(it, extension) {
+  // Check file extension
+  if (!it.toString().toLowerCase().endsWith(extension.toLowerCase())) exit 1, "File: ${it} has the wrong extension: ${extension} see --help for more information"
 }
