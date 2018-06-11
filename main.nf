@@ -5,6 +5,8 @@
 ================================================================================
 */
 
+tsvPath = params.sample
+
 fastqFiles = Channel.empty()
 bamFiles = Channel.empty()
 
@@ -61,7 +63,7 @@ def extractFastq(tsvFile) {
   Channel
     .from(tsvFile.readLines())
     .map{line ->
-      def list       = returnTSV(line.split(),7)
+      def list       = returnTSV(line.split(),8)
       def idPatient  = list[0]
       def gender     = list[1]
       def status     = returnStatus(list[2].toInteger())
