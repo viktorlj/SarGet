@@ -65,11 +65,30 @@ if (params.verbose) fastQCreport = fastQCreport.view {
   Files : [${it[0].fileName}, ${it[1].fileName}]"
 }
 
+fastqFiles.into { trim_info; align_info }
+
+process TrimReads {
+  tag {idPatient + "-" + idRun}
+
+  input:
+    set idPatient, status, idSample, idRun, file(fastqFile1), file(fastqFile2) from trim_info
+
+  output:
+    file "*fastq.gz" into trimmed_reads
+    set idPatient, status, idSample, idRun into trim_output
+
+  script:
+  """
+  java -Xmx6g -jar /AGeNT/SurecallTrimmer.jar -hs -fq1 ${fastqFile1} -fq2 ${fastqFile2}
+  """
+}
+
 process MapReads {
   tag {idPatient + "-" + idRun}
 
   input:
-    set idPatient, status, idSample, idRun, file(fastqFile1), file(fastqFile2) from fastqFiles
+    set idPatient, status, idSample, idRun from trim_output
+    file reads from trimmed_reads
     set file(genomeFile), file(bwaIndex) from Channel.value([referenceMap.genomeFile, referenceMap.bwaIndex])
 
   output:
@@ -81,10 +100,23 @@ process MapReads {
   extra = status == 1 ? "-B 3" : ""
   """
   bwa mem -R \"${readGroup}\" ${extra} -t ${task.cpus} -M \
-  ${genomeFile} ${fastqFile1} ${fastqFile2} | \
+  ${genomeFile} $reads | \
   samtools sort --threads ${task.cpus} -m 4G - > ${idRun}.bam
   """
 }
+
+process AddUMIs{
+  tag {idPatient + "-" + idRun}
+
+  input:
+    set idPatient, status, idSample, idRun, file(bam) from mappedBam
+
+  output
+    set idPatient, status, idSample, idRun, file("${idRun}.bam") into UMIBam
+
+}
+
+java -Xmx12G -jar /Users/viklj600/BioData/AGeNT/LocatIt_v4.0.1.jar -X temp -t temp -U -IB -b 48379-1504167684_Amplicons.bed -o temp/"$1".UMI.unsorted.bam temp/"$1".sorted.bam ../RawData/"$1"_UMI_001.fastq.gz
 
 
 /*
