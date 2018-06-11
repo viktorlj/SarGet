@@ -1,4 +1,11 @@
 /*
+ * Define the default parameters - will be moved to external config files later
+ */
+
+params.verbose = false // Enable for more verbose information
+outDir = "${PWD}" // Path to output directory
+
+/*
 ================================================================================
 =                           C O N F I G U R A T I O N                          =
 ================================================================================
@@ -20,7 +27,36 @@ fastqFiles = extractFastq(tsvFile)
 ================================================================================
 */
 
+(fastqFiles, fastqFilesforFastQC) = fastqFiles.into(2)
 
+print fastqFiles
+
+/*
+
+if (params.verbose) fastqFiles = fastqFiles.view {
+  "FASTQs to preprocess:\n\
+  ID    : ${it[0]}\tStatus: ${it[1]}\tSample: ${it[2]}\tRun   : ${it[3]}\n\
+  Files : [${it[4].fileName}, ${it[5].fileName}]"
+}
+
+process RunFastQC {
+  tag {idPatient + "-" + idRun}
+
+  publishDir "${directoryMap.fastQC}/${idRun}", mode: 'link'
+
+  input:
+    set idPatient, status, idSample, idRun, file(fastqFile1), file(fastqFile2) from fastqFilesforFastQC
+
+  output:
+    file "*_fastqc.{zip,html}" into fastQCreport
+
+  script:
+  """
+  fastqc -q ${fastqFile1} ${fastqFile2}
+  """
+}
+
+*/
 
 
 /*
@@ -28,6 +64,19 @@ fastqFiles = extractFastq(tsvFile)
 =                               F U N C T I O N S                              =
 ================================================================================
 */
+
+def defineDirectoryMap() {
+  return [
+    'nonRealigned'     : "${params.outDir}/Preprocessing/NonRealigned",
+    'nonRecalibrated'  : "${params.outDir}/Preprocessing/NonRecalibrated",
+    'recalibrated'     : "${params.outDir}/Preprocessing/Recalibrated",
+    'bamQC'            : "${params.outDir}/Reports/bamQC",
+    'bcftoolsStats'    : "${params.outDir}/Reports/BCFToolsStats",
+    'fastQC'           : "${params.outDir}/Reports/FastQC",
+    'markDuplicatesQC' : "${params.outDir}/Reports/MarkDuplicates",
+    'samtoolsStats'    : "${params.outDir}/Reports/SamToolsStats"
+  ]
+}
 
 def checkFileExtension(it, extension) {
   // Check file extension
@@ -40,7 +89,7 @@ def extractFastq(tsvFile) {
   Channel
     .from(tsvFile.readLines())
     .map{line ->
-      def list       = returnTSV(line.split(),8)
+      def list       = returnTSV(line.split(),7)
       def idPatient  = list[0]
       def gender     = list[1]
       def status     = returnStatus(list[2].toInteger())
@@ -48,13 +97,11 @@ def extractFastq(tsvFile) {
       def idRun      = list[4]
       def fastqFile1 = returnFile(list[5])
       def fastqFile2 = returnFile(list[6])
-      def indexFile = returnFile(list[7])
 
       checkFileExtension(fastqFile1,".fastq.gz")
       checkFileExtension(fastqFile2,".fastq.gz")
-      checkFileExtension(indexFile,".fastq.gz")
 
-      [idPatient, gender, status, idSample, idRun, fastqFile1, fastqFile2, indexFile]
+      [idPatient, gender, status, idSample, idRun, fastqFile1, fastqFile2]
     }
 }
 
@@ -78,3 +125,4 @@ def returnStatus(it) {
   if (!(it in [0, 1])) exit 1, "Status is not recognized in TSV file: ${it}, see --help for more information"
   return it
 }
+
