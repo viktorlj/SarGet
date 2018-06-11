@@ -3,7 +3,8 @@
  */
 
 params.verbose = false // Enable for more verbose information
-outDir = "${PWD}" // Path to output directory
+params.outDir = "${PWD}" // Path to output directory
+
 
 /*
 ================================================================================
@@ -20,6 +21,10 @@ bamFiles = Channel.empty()
 tsvFile = file(tsvPath)
 fastqFiles = extractFastq(tsvFile)
 
+(patientGenders, fastqFiles) = extractGenders(fastqFiles)
+
+directoryMap = defineDirectoryMap()
+referenceMap = defineReferenceMap()
 
 /*
 ================================================================================
@@ -27,11 +32,10 @@ fastqFiles = extractFastq(tsvFile)
 ================================================================================
 */
 
+startMessage()
+
 (fastqFiles, fastqFilesforFastQC) = fastqFiles.into(2)
 
-print fastqFiles
-
-/*
 
 if (params.verbose) fastqFiles = fastqFiles.view {
   "FASTQs to preprocess:\n\
@@ -56,7 +60,31 @@ process RunFastQC {
   """
 }
 
-*/
+if (params.verbose) fastQCreport = fastQCreport.view {
+  "FastQC report:\n\
+  Files : [${it[0].fileName}, ${it[1].fileName}]"
+}
+
+process MapReads {
+  tag {idPatient + "-" + idRun}
+
+  input:
+    set idPatient, status, idSample, idRun, file(fastqFile1), file(fastqFile2) from fastqFiles
+    set file(genomeFile), file(bwaIndex) from Channel.value([referenceMap.genomeFile, referenceMap.bwaIndex])
+
+  output:
+    set idPatient, status, idSample, idRun, file("${idRun}.bam") into mappedBam
+
+  script:
+  readGroup = "@RG\\tID:${idRun}\\tPU:${idRun}\\tSM:${idSample}\\tLB:${idSample}\\tPL:illumina"
+  // adjust mismatch penalty for tumor samples
+  extra = status == 1 ? "-B 3" : ""
+  """
+  bwa mem -R \"${readGroup}\" ${extra} -t ${task.cpus} -M \
+  ${genomeFile} ${fastqFile1} ${fastqFile2} | \
+  samtools sort --threads ${task.cpus} -m 4G - > ${idRun}.bam
+  """
+}
 
 
 /*
@@ -64,6 +92,16 @@ process RunFastQC {
 =                               F U N C T I O N S                              =
 ================================================================================
 */
+
+def checkFileExtension(it, extension) {
+  // Check file extension
+  if (!it.toString().toLowerCase().endsWith(extension.toLowerCase())) exit 1, "File: ${it} has the wrong extension: ${extension} see --help for more information"
+}
+
+def checkParamReturnFile(item) {
+  params."${item}" = params.genomes[params.genome]."${item}"
+  return file(params."${item}")
+}
 
 def defineDirectoryMap() {
   return [
@@ -78,9 +116,18 @@ def defineDirectoryMap() {
   ]
 }
 
-def checkFileExtension(it, extension) {
-  // Check file extension
-  if (!it.toString().toLowerCase().endsWith(extension.toLowerCase())) exit 1, "File: ${it} has the wrong extension: ${extension} see --help for more information"
+def defineReferenceMap() {
+  if (!(params.genome in params.genomes)) exit 1, "Genome ${params.genome} not found in configuration"
+  return [
+    // genome reference dictionary
+    'genomeDict'       : checkParamReturnFile("genomeDict"),
+    // FASTA genome reference
+    'genomeFile'       : checkParamReturnFile("genomeFile"),
+    // genome .fai file
+    'genomeIndex'      : checkParamReturnFile("genomeIndex"),
+    // BWA index files
+    'bwaIndex'         : checkParamReturnFile("bwaIndex"),
+  ]
 }
 
 def extractFastq(tsvFile) {
@@ -105,6 +152,37 @@ def extractFastq(tsvFile) {
     }
 }
 
+def extractGenders(channel) {
+  def genders = [:]  // an empty map
+  channel = channel.map{ it ->
+    def idPatient = it[0]
+    def gender = it[1]
+    genders[idPatient] = gender
+    [idPatient] + it[2..-1]
+  }
+  [genders, channel]
+}
+
+def minimalInformationMessage() {
+  // Minimal information message
+  log.info "Command Line: " + workflow.commandLine
+  log.info "Profile     : " + workflow.profile
+  log.info "Project Dir : " + workflow.projectDir
+  log.info "Launch Dir  : " + workflow.launchDir
+  log.info "Work Dir    : " + workflow.workDir
+  log.info "Out Dir     : " + params.outDir
+  log.info "TSV file    : ${tsvFile}"
+  log.info "Genome      : " + params.genome
+  log.info "Genome_base : " + params.genome_base
+  log.info "Reference files used:"
+  log.info "  dbsnp       :\n\t" + referenceMap.dbsnp
+  log.info "\t" + referenceMap.dbsnpIndex
+  log.info "  genome      :\n\t" + referenceMap.genomeFile
+  log.info "\t" + referenceMap.genomeDict
+  log.info "\t" + referenceMap.genomeIndex
+  log.info "  bwa indexes :\n\t" + referenceMap.bwaIndex.join(',\n\t')
+}
+
 def returnFile(it) {
   // return file if it exists
   if (!file(it).exists()) exit 1, "Missing file in TSV file: ${it}, see --help for more information"
@@ -126,3 +204,7 @@ def returnStatus(it) {
   return it
 }
 
+def startMessage() {
+  // Display start message
+  this.minimalInformationMessage()
+}
