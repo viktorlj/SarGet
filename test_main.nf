@@ -1,3 +1,5 @@
+#!/usr/bin/env nextflow
+
 /*
  * Define the default parameters - will be moved to external config files later
  */
@@ -12,14 +14,18 @@ params.outDir = "${PWD}" // Path to output directory
 ================================================================================
 */
 
+
+
 tsvPath = ''
 if (params.sample) tsvPath = params.sample
 
 fastqFiles = Channel.empty()
 bamFiles = Channel.empty()
+indexRead_file = Channel.value()
 
 tsvFile = file(tsvPath)
 fastqFiles = extractFastq(tsvFile)
+indexRead_file = extractUMIRead(tsvFile)
 
 (patientGenders, fastqFiles) = extractGenders(fastqFiles)
 
@@ -65,13 +71,11 @@ if (params.verbose) fastQCreport = fastQCreport.view {
   Files : [${it[0].fileName}, ${it[1].fileName}]"
 }
 
-fastqFiles.into { trim_info; align_info }
-
 process TrimReads {
   tag {idPatient + "-" + idRun}
 
   input:
-    set idPatient, status, idSample, idRun, file(fastqFile1), file(fastqFile2) from trim_info
+    set idPatient, status, idSample, idRun, file(fastqFile1), file(fastqFile2) from fastqFiles
 
   output:
     file "*fastq.gz" into trimmed_reads
@@ -83,9 +87,12 @@ process TrimReads {
   """
 }
 
+//Map trimmed reads with BWA. Trim 1bp to reduce error rate. Output into two channels.
 process MapReads {
   tag {idPatient + "-" + idRun}
 
+  publishDir "${directoryMap.MapReads}/${idRun}", mode: 'link', pattern: '*trimmed.bam*'
+  
   input:
     set idPatient, status, idSample, idRun from trim_output
     file reads from trimmed_reads
@@ -93,31 +100,40 @@ process MapReads {
 
   output:
     set idPatient, status, idSample, idRun, file("${idRun}.bam") into mappedBam
+    set idPatient, status, idSample, idRun, file("${idRun}.standard.sorted.trimmed.bam"), file("${idRun}.standard.sorted.trimmed.bam.bai")  into trimmed_StandardBAM
 
   script:
   readGroup = "@RG\\tID:${idRun}\\tPU:${idRun}\\tSM:${idSample}\\tLB:${idSample}\\tPL:illumina"
   // adjust mismatch penalty for tumor samples
-  extra = status == 1 ? "-B 3" : ""
   """
-  bwa mem -R \"${readGroup}\" ${extra} -t ${task.cpus} -M \
+  bwa mem -R \"${readGroup}\" -t ${task.cpus} -B 3 -M \
   ${genomeFile} $reads | \
   samtools sort --threads ${task.cpus} -m 4G - > ${idRun}.bam
+  bam trimBam ${idRun}.bam ${idRun}.standard.sorted.trimmed.bam 1
+  samtools index ${idRun}.standard.sorted.trimmed.bam
   """
 }
 
-process AddUMIs{
+process AddUMIs {
   tag {idPatient + "-" + idRun}
+
+  publishDir "${directoryMap.AddUMIs}/${idRun}", mode: 'link'
 
   input:
     set idPatient, status, idSample, idRun, file(bam) from mappedBam
+    file indexRead from indexRead_file
 
-  output
-    set idPatient, status, idSample, idRun, file("${idRun}.bam") into UMIBam
+  output:
+    set idPatient, status, idSample, idRun, file("${idRun}.UMI.sorted.trimmed.bam"), file("${idRun}.UMI.sorted.trimmed.bam.bai") into trimmed_umiBAM
 
+  script:
+  """
+  java -Xmx10g -jar /AGeNT/LocatIt.jar -U -IB -b '/Users/viklj600/Projects/TargetSeq/48379-1504167684_Amplicons.bed' -o ${idRun}.UMI.bam ${bam} ${indexRead}
+  samtools sort -o ${idRun}.UMI.sorted.bam ${idRun}.UMI.bam
+  bam trimBam ${idRun}.UMI.sorted.bam ${idRun}.UMI.sorted.trimmed.bam 1
+  samtools index ${idRun}.UMI.sorted.trimmed.bam
+  """
 }
-
-java -Xmx12G -jar /Users/viklj600/BioData/AGeNT/LocatIt_v4.0.1.jar -X temp -t temp -U -IB -b 48379-1504167684_Amplicons.bed -o temp/"$1".UMI.unsorted.bam temp/"$1".sorted.bam ../RawData/"$1"_UMI_001.fastq.gz
-
 
 /*
 ================================================================================
@@ -137,14 +153,12 @@ def checkParamReturnFile(item) {
 
 def defineDirectoryMap() {
   return [
-    'nonRealigned'     : "${params.outDir}/Preprocessing/NonRealigned",
-    'nonRecalibrated'  : "${params.outDir}/Preprocessing/NonRecalibrated",
-    'recalibrated'     : "${params.outDir}/Preprocessing/Recalibrated",
     'bamQC'            : "${params.outDir}/Reports/bamQC",
     'bcftoolsStats'    : "${params.outDir}/Reports/BCFToolsStats",
     'fastQC'           : "${params.outDir}/Reports/FastQC",
-    'markDuplicatesQC' : "${params.outDir}/Reports/MarkDuplicates",
-    'samtoolsStats'    : "${params.outDir}/Reports/SamToolsStats"
+    'samtoolsStats'    : "${params.outDir}/Reports/SamToolsStats",
+    'MapReads'         : "${params.outDir}/BAMfiles",
+    'AddUMIs'          : "${params.outDir}/BAMfiles"
   ]
 }
 
@@ -168,7 +182,7 @@ def extractFastq(tsvFile) {
   Channel
     .from(tsvFile.readLines())
     .map{line ->
-      def list       = returnTSV(line.split(),7)
+      def list       = returnTSV(line.split(),8)
       def idPatient  = list[0]
       def gender     = list[1]
       def status     = returnStatus(list[2].toInteger())
@@ -181,6 +195,21 @@ def extractFastq(tsvFile) {
       checkFileExtension(fastqFile2,".fastq.gz")
 
       [idPatient, gender, status, idSample, idRun, fastqFile1, fastqFile2]
+    }
+}
+
+def extractUMIRead(tsvFile) {
+  // Channeling the TSV file containing FASTQ.
+  // Format is: "subject gender status sample lane fastq1 fastq2"
+  Channel
+    .from(tsvFile.readLines())
+    .map{line ->
+      def list       = returnTSV(line.split(),8)
+      def indexRead = returnFile(list[7])
+
+      checkFileExtension(indexRead,".fastq.gz")
+
+      [indexRead]
     }
 }
 
@@ -207,8 +236,6 @@ def minimalInformationMessage() {
   log.info "Genome      : " + params.genome
   log.info "Genome_base : " + params.genome_base
   log.info "Reference files used:"
-  log.info "  dbsnp       :\n\t" + referenceMap.dbsnp
-  log.info "\t" + referenceMap.dbsnpIndex
   log.info "  genome      :\n\t" + referenceMap.genomeFile
   log.info "\t" + referenceMap.genomeDict
   log.info "\t" + referenceMap.genomeIndex
