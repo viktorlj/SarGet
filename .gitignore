@@ -1,6 +1,6 @@
 .DS_Store
-.nextflow
+.nextflow/
 work
 .nextflow.log*
-Reports
-BAMfiles
+Reports/
+BAMfiles/

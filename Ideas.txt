@@ -11,3 +11,7 @@ VarScan2 not working, remove?
 Add Pisces instead
 https://github.com/Illumina/Pisces
 https://github.com/dotnet/core/blob/master/release-notes/download-archives/1.0.5-download.md
+
+Or rather verdict?
+https://github.com/AstraZeneca-NGS/VarDictJava
+https://github.com/AstraZeneca-NGS/VarDict
