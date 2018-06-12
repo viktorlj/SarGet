@@ -1,8 +1,9 @@
 ## SarGet
 Hacked version of [Sarek](https://github.com/SciLifeLab/Sarek) for processing of Haloplex HS targeted sequencing data.
 
-##### Steps
+All tools in docker viktorlj/targetseq
 
+##### Steps
 1. Trimming with SurecallTrimmer
 2. Alignment with BWA
 3. UMI mapping with LocatIt
