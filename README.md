@@ -19,3 +19,16 @@ All tools in docker viktorlj/targetseq
 idPatient	 idSample	 fastqFile1	 fastqFile2	UMI-read
 ```
 
+##### TODO
+
+Create bcftools downstream processing script. Probably python parser also needed. Something like:
+```bash
+bcftools query -f '%CHROM \t %POS \t %REF \t %ALT \t %TYPE  \t [%VF] \t %CSQ \n' ${vcf} | tr '|' '\t'
+```
+
+Enable high sens calling from UMI data. Not working:
+```bash
+dotnet /Pisces/5.2.7.47/Pisces_5.2.7.47/Pisces.dll -g ${piscesGenome} -bam ${bam} -i ${regions} -OutFolder . -MinVF 0.0005 -SSFilter false -MinBQ 65 -MaxVQ 100 -MinDepthFilter 500 -MinVQ 0 -VQFilter 20 -ReportNoCalls True -CallMNVs False -RMxNFilter 5,9,0.35 -MinDepth 5 -threadbychr true -gVCF false
+```
+
+Add calling output for non-UMI sample?

@@ -177,10 +177,10 @@ process RunVEP {
   -o ${idSample}.vep.ann.vcf \
   --stats_file ${idSample}.vep.summary.html \
   --cache \
-  --everything \
+  --symbol --variant_class --canonical --af_1kg --af_gnomad --check_existing \
   --format vcf \
   --offline \
-  --per_gene \
+  --pick \
   --fork ${task.cpus} \
   --total_length \
   --cache_version 91 \
