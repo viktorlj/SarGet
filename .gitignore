@@ -4,3 +4,5 @@ work
 .nextflow.log*
 Reports/
 BAMfiles/
+Annotation/
+VCFFiles/

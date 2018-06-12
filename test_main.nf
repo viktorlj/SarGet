@@ -146,7 +146,7 @@ output:
   set idPatient, idSample, file("${idSample}.UMI.sorted.trimmed.vcf") into variantsUMI
 
 
-//   High sens settings suggested by Illumina, no outout right now
+//   High sens settings suggested by Illumina, no output right now
 //   dotnet /Pisces/5.2.7.47/Pisces_5.2.7.47/Pisces.dll -g ${piscesGenome} -bam ${bam} -i ${regions} -OutFolder . -MinVF 0.0005 -SSFilter false -MinBQ 65 -MaxVQ 100 -MinDepthFilter 500 -MinVQ 0 -VQFilter 20 -ReportNoCalls True -CallMNVs False -RMxNFilter 5,9,0.35 -MinDepth 5 -threadbychr true -gVCF false
 
 script:
@@ -154,6 +154,38 @@ script:
   dotnet /Pisces/5.2.7.47/Pisces_5.2.7.47/Pisces.dll -CallMNVs false -g ${piscesGenome} -bam ${bam} -i ${regions} -OutFolder . -gVCF false -i ${regions}  -RMxNFilter 5,9,0.35
   """
 
+}
+
+// Defined --cache_version 91 to sync with installed version in docker
+process RunVEP {
+  tag {idPatient}
+
+  publishDir directoryMap.vep, mode: 'link'
+
+  input:
+    set idPatient, idSample, file(vcf) from variantsUMI
+
+  output:
+    set file("${idSample}.vep.ann.vcf"), file("${idSample}.vep.summary.html") into vepReport
+
+  
+  script:
+  """
+  egrep "#|PASS" ${vcf} > pass.${vcf}
+  vep \
+  -i pass.${vcf} \
+  -o ${idSample}.vep.ann.vcf \
+  --stats_file ${idSample}.vep.summary.html \
+  --cache \
+  --everything \
+  --format vcf \
+  --offline \
+  --per_gene \
+  --fork ${task.cpus} \
+  --total_length \
+  --cache_version 91 \
+  --vcf
+  """
 }
 
 /*
@@ -180,7 +212,8 @@ def defineDirectoryMap() {
     'samtoolsStats'    : "${params.outDir}/Reports/SamToolsStats",
     'MapReads'         : "${params.outDir}/BAMfiles",
     'AddUMIs'          : "${params.outDir}/BAMfiles",
-    'VariantCallingUMI': "${params.outDir}/VCFFiles"
+    'VariantCallingUMI': "${params.outDir}/VCFFiles",
+    'vep'              : "${params.outDir}/Annotation/VEP"
   ]
 }
 
