@@ -27,6 +27,15 @@ apt-get update && apt-get install -y --no-install-recommends \
   wget \
   zlib1g-dev
 
+# Install dotnet
+wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > microsoft.asc.gpg
+mv microsoft.asc.gpg /etc/apt/trusted.gpg.d/
+wget -q https://packages.microsoft.com/config/debian/8/prod.list
+mv prod.list /etc/apt/sources.list.d/microsoft-prod.list
+apt-get install -y --no-install-recommends apt-transport-https
+apt-get update
+apt-get install -y --no-install-recommends dotnet-sdk-2.1
+
 # Install tools
 mkdir /build
 
@@ -90,12 +99,14 @@ mkdir /AGeNT
 mv LocatIt_v4.0.1.jar /AGeNT/LocatIt.jar
 mv SurecallTrimmer_v4.0.1.jar /AGeNT/SurecallTrimmer.jar
 
-#Install VarScan2
+# Install Pisces suite
 cd /build
-git clone https://github.com/dkoboldt/varscan.git VarScan2
-cd VarScan2
-mkdir /VarScan2
-mv VarScan.v2.4.3.jar /VarScan2/VarScan.v2.4.3.jar
+git clone https://github.com/Illumina/Pisces.git Pisces
+cd Pisces
+mkdir /Pisces/
+cp -r binaries/5.2.7.47 /Pisces/
+cd /Pisces/5.2.7.47
+for a in `ls -1 *.tar.gz`; do tar -zxvf $a; done
 
 # Clean up install
 cd /

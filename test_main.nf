@@ -31,8 +31,6 @@ tsvFile = file(tsvPath)
 fastqFiles = extractFastq(tsvFile)
 indexRead_file = extractUMIRead(tsvFile)
 
-(patientGenders, fastqFiles) = extractGenders(fastqFiles)
-
 directoryMap = defineDirectoryMap()
 referenceMap = defineReferenceMap()
 
@@ -46,19 +44,13 @@ startMessage()
 
 (fastqFiles, fastqFilesforFastQC) = fastqFiles.into(2)
 
-if (params.verbose) fastqFiles = fastqFiles.view {
-  "FASTQs to preprocess:\n\
-  ID    : ${it[0]}\tStatus: ${it[1]}\tSample: ${it[2]}\tRun   : ${it[3]}\n\
-  Files : [${it[4].fileName}, ${it[5].fileName}]"
-}
-
 process RunFastQC {
-  tag {idPatient + "-" + idRun}
+  tag {idPatient}
 
-  publishDir "${directoryMap.fastQC}/${idRun}", mode: 'link'
+  publishDir "${directoryMap.fastQC}/${idSample}", mode: 'link'
 
   input:
-    set idPatient, status, idSample, idRun, file(fastqFile1), file(fastqFile2) from fastqFilesforFastQC
+    set idPatient, idSample, file(fastqFile1), file(fastqFile2) from fastqFilesforFastQC
 
   output:
     file "*_fastqc.{zip,html}" into fastQCreport
@@ -75,14 +67,14 @@ if (params.verbose) fastQCreport = fastQCreport.view {
 }
 
 process TrimReads {
-  tag {idPatient + "-" + idRun}
+  tag {idPatient}
 
   input:
-    set idPatient, status, idSample, idRun, file(fastqFile1), file(fastqFile2) from fastqFiles
+    set idPatient, idSample, file(fastqFile1), file(fastqFile2) from fastqFiles
 
   output:
     file "*fastq.gz" into trimmed_reads
-    set idPatient, status, idSample, idRun into trim_output
+    set idPatient, idSample into trim_output
 
   script:
   """
@@ -92,68 +84,74 @@ process TrimReads {
 
 //Map trimmed reads with BWA. Trim 1bp to reduce error rate. Output into two channels.
 process MapReads {
-  tag {idPatient + "-" + idRun}
+  tag {idPatient}
 
-  publishDir "${directoryMap.MapReads}/${idRun}", mode: 'link', pattern: '*trimmed.bam*'
+  publishDir "${directoryMap.MapReads}/${idSample}", mode: 'link', pattern: '*trimmed.bam*'
   
   input:
-    set idPatient, status, idSample, idRun from trim_output
+    set idPatient, idSample from trim_output
     file reads from trimmed_reads
     set file(genomeFile), file(bwaIndex) from Channel.value([referenceMap.genomeFile, referenceMap.bwaIndex])
 
   output:
-    set idPatient, status, idSample, idRun, file("${idRun}.bam") into mappedBam
-    set idPatient, status, idSample, idRun, file("${idRun}.standard.sorted.trimmed.bam"), file("${idRun}.standard.sorted.trimmed.bam.bai")  into trimmed_StandardBAM
+    set idPatient, idSample, file("${idSample}.bam") into mappedBam
+    set idPatient, idSample, file("${idSample}.standard.sorted.trimmed.bam"), file("${idSample}.standard.sorted.trimmed.bam.bai")  into trimmed_StandardBAM
 
   script:
-  readGroup = "@RG\\tID:${idRun}\\tPU:${idRun}\\tSM:${idSample}\\tLB:${idSample}\\tPL:illumina"
+  readGroup = "@RG\\tID:${idSample}\\tPU:${idSample}\\tSM:${idSample}\\tLB:${idSample}\\tPL:illumina"
   // adjust mismatch penalty for tumor samples
   """
   bwa mem -R \"${readGroup}\" -t ${task.cpus} -B 3 -M \
   ${genomeFile} $reads | \
-  samtools sort --threads ${task.cpus} -m 4G - > ${idRun}.bam
-  bam trimBam ${idRun}.bam ${idRun}.standard.sorted.trimmed.bam 1
-  samtools index ${idRun}.standard.sorted.trimmed.bam
+  samtools sort --threads ${task.cpus} -m 4G - > ${idSample}.bam
+  bam trimBam ${idSample}.bam ${idSample}.standard.sorted.trimmed.bam 1
+  samtools index ${idSample}.standard.sorted.trimmed.bam
   """
 }
 
 process AddUMIs {
-  tag {idPatient + "-" + idRun}
+  tag {idPatient}
 
-  publishDir "${directoryMap.AddUMIs}/${idRun}", mode: 'link'
+  publishDir "${directoryMap.AddUMIs}/${idSample}", mode: 'link'
 
   input:
-    set idPatient, status, idSample, idRun, file(bam) from mappedBam
+    set idPatient, idSample, file(bam) from mappedBam
     file indexRead from indexRead_file
+    file(amplicons) from Channel.value(ampliconFile)
 
   output:
-    set idPatient, status, idSample, idRun, file("${idRun}.UMI.sorted.trimmed.bam"), file("${idRun}.UMI.sorted.trimmed.bam.bai") into trimmed_umiBAM
+    set idPatient, idSample, file("${idSample}.UMI.sorted.trimmed.bam"), file("${idSample}.UMI.sorted.trimmed.bam.bai") into trimmed_umiBAM
 
   script:
   """
-  java -Xmx10g -jar /AGeNT/LocatIt.jar -U -IB -b ${ampliconFile} -o ${idRun}.UMI.bam ${bam} ${indexRead}
-  samtools sort -o ${idRun}.UMI.sorted.bam ${idRun}.UMI.bam
-  bam trimBam ${idRun}.UMI.sorted.bam ${idRun}.UMI.sorted.trimmed.bam 1
-  samtools index ${idRun}.UMI.sorted.trimmed.bam
+  java -Xmx10g -jar /AGeNT/LocatIt.jar -U -IB -b ${amplicons} -o ${idSample}.UMI.bam ${bam} ${indexRead}
+  samtools sort -o ${idSample}.UMI.sorted.bam ${idSample}.UMI.bam
+  bam trimBam ${idSample}.UMI.sorted.bam ${idSample}.UMI.sorted.trimmed.bam 1
+  samtools index ${idSample}.UMI.sorted.trimmed.bam
   """
 }
 
-process VariantCallingUMI {
- tag {idPatient + "-" + idRun}
 
-publishDir "${directoryMap.VariantCallingUMI}/${idRun}", mode: 'link'
+process VariantCallingUMI {
+ tag {idPatient}
+
+publishDir "${directoryMap.VariantCallingUMI}/${idSample}", mode: 'link'
 
 input:
-  set idPatient, status, idSample, idRun, file(bam), file(bai) from trimmed_umiBAM
-  file genomeFile from Channel.value(referenceMap.genomeFile)
-
+  set idPatient, idSample, file(bam), file(bai) from trimmed_umiBAM
+  file(piscesGenome) from Channel.fromPath(params.genome_base)
+  file(regions) from Channel.value(regionsFile)
 
 output:
-  set idPatient, status, idSample, idRun, file("${idRun}.UMI.variants.vcf") into variantsUMI
+  set idPatient, idSample, file("${idSample}.UMI.sorted.trimmed.vcf") into variantsUMI
+
+
+//   High sens settings suggested by Illumina, no outout right now
+//   dotnet /Pisces/5.2.7.47/Pisces_5.2.7.47/Pisces.dll -g ${piscesGenome} -bam ${bam} -i ${regions} -OutFolder . -MinVF 0.0005 -SSFilter false -MinBQ 65 -MaxVQ 100 -MinDepthFilter 500 -MinVQ 0 -VQFilter 20 -ReportNoCalls True -CallMNVs False -RMxNFilter 5,9,0.35 -MinDepth 5 -threadbychr true -gVCF false
 
 script:
   """
-  samtools mpileup -f ${genomeFile} -d 100000 -A -B -q 20 -l ${regionsFile} ${bam} | java -Xmx14g -jar /VarScan2/VarScan.v2.4.3.jar mpileup2cns --min-var-freq 0.005 --min-coverage 40 --min-avg-qual 20 --variants 1 --min-reads2 5 --output-vcf 1 --strand-filter 0 > ${idRun}.UMI.variants.vcf
+  dotnet /Pisces/5.2.7.47/Pisces_5.2.7.47/Pisces.dll -CallMNVs false -g ${piscesGenome} -bam ${bam} -i ${regions} -OutFolder . -gVCF false -i ${regions}  -RMxNFilter 5,9,0.35
   """
 
 }
@@ -202,50 +200,36 @@ def defineReferenceMap() {
 
 def extractFastq(tsvFile) {
   // Channeling the TSV file containing FASTQ.
-  // Format is: "subject gender status sample lane fastq1 fastq2"
+  // Format is: "subject sample fastq1 fastq2 UMIread"
   Channel
     .from(tsvFile.readLines())
     .map{line ->
-      def list       = returnTSV(line.split(),8)
+      def list       = returnTSV(line.split(),5)
       def idPatient  = list[0]
-      def gender     = list[1]
-      def status     = returnStatus(list[2].toInteger())
-      def idSample   = list[3]
-      def idRun      = list[4]
-      def fastqFile1 = returnFile(list[5])
-      def fastqFile2 = returnFile(list[6])
+      def idSample   = list[1]
+      def fastqFile1 = returnFile(list[2])
+      def fastqFile2 = returnFile(list[3])
 
       checkFileExtension(fastqFile1,".fastq.gz")
       checkFileExtension(fastqFile2,".fastq.gz")
 
-      [idPatient, gender, status, idSample, idRun, fastqFile1, fastqFile2]
+      [idPatient, idSample, fastqFile1, fastqFile2]
     }
 }
 
 def extractUMIRead(tsvFile) {
   // Channeling the TSV file containing FASTQ.
-  // Format is: "subject gender status sample lane fastq1 fastq2"
+  // Format is: "subject sample lane fastq1 fastq2 UMIread"
   Channel
     .from(tsvFile.readLines())
     .map{line ->
-      def list       = returnTSV(line.split(),8)
-      def indexRead = returnFile(list[7])
+      def list       = returnTSV(line.split(),5)
+      def indexRead = returnFile(list[4])
 
       checkFileExtension(indexRead,".fastq.gz")
 
       [indexRead]
     }
-}
-
-def extractGenders(channel) {
-  def genders = [:]  // an empty map
-  channel = channel.map{ it ->
-    def idPatient = it[0]
-    def gender = it[1]
-    genders[idPatient] = gender
-    [idPatient] + it[2..-1]
-  }
-  [genders, channel]
 }
 
 def minimalInformationMessage() {
@@ -275,15 +259,6 @@ def returnFile(it) {
 def returnTSV(it, number) {
   // return TSV if it has the correct number of items in row
   if (it.size() != number) exit 1, "Malformed row in TSV file: ${it}, see --help for more information"
-  return it
-}
-
-def returnStatus(it) {
-  // Return status if it's correct
-  // Status should be only 0 or 1
-  // 0 being normal
-  // 1 being tumor (or relapse or anything that is not normal...)
-  if (!(it in [0, 1])) exit 1, "Status is not recognized in TSV file: ${it}, see --help for more information"
   return it
 }
 
