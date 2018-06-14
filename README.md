@@ -8,6 +8,7 @@ All tools in docker viktorlj/targetseq
 2. Alignment with BWA
 3. UMI mapping with LocatIt
 4. Variant calling with Pisces
+5. Annotation with VEP
 
 ##### Usage
 ```bash
@@ -20,6 +21,8 @@ idPatient	 idSample	 fastqFile1	 fastqFile2	UMI-read
 ```
 
 ##### TODO
+
+Add Uppmax functions / paths
 
 Create bcftools downstream processing script. Probably python parser also needed. Something like:
 ```bash

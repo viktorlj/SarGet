@@ -156,36 +156,39 @@ script:
 
 }
 
-// Defined --cache_version 91 to sync with installed version in docker
-process RunVEP {
+process RunSnpeff {
   tag {idPatient}
 
-  publishDir directoryMap.vep, mode: 'link'
+  publishDir params.outDir , saveAs: { it == "${vcf.baseName}.snpEff.csv" ? "${directoryMap.snpeffReports}/${it}" : "${directoryMap.snpeff}/${it}" }, mode: 'link'
 
   input:
     set idPatient, idSample, file(vcf) from variantsUMI
+    val snpeffDb from Channel.value(params.genomes[params.genome].snpeffDb)
+    set file(cosmic), file(cosmicIndex), file(dbnsfp), file(dbnsfpIndex) from Channel.value([
+      referenceMap.cosmic,
+      referenceMap.cosmicIndex,
+      referenceMap.dbnsfp,
+      referenceMap.dbnsfpIndex
+    ])
+
 
   output:
-    set file("${idSample}.vep.ann.vcf"), file("${idSample}.vep.summary.html") into vepReport
+    set file("${vcf.baseName}.snpEff.ann.vcf"), file("${vcf.baseName}.snpEff.genes.txt"), file("${vcf.baseName}.snpEff.csv"), file("${vcf.baseName}.snpEff.summary.html") into snpeffReport
+		file("${vcf.baseName}.snpEff.ann.vcf") into snpEffOutputVCFs
 
-  
-  script:
+    script:
   """
-  egrep "#|PASS" ${vcf} > pass.${vcf}
-  vep \
-  -i pass.${vcf} \
-  -o ${idSample}.vep.ann.vcf \
-  --stats_file ${idSample}.vep.summary.html \
-  --cache \
-  --symbol --variant_class --canonical --af_1kg --af_gnomad --check_existing \
-  --format vcf \
-  --offline \
-  --pick \
-  --fork ${task.cpus} \
-  --total_length \
-  --cache_version 91 \
-  --vcf
+  java -Xmx4g -jar \$SNPEFF_HOME/snpEff.jar ${snpeffDb} -csvStats ${vcf.baseName}.snpEff.csv -nodownload -canon -v ${vcf} | \
+  java -jar \$SNPEFF_HOME/SnpSift.jar dbnsfp -v -f phastCons100way_vertebrate,1000Gp3_EUR_AF,gnomAD_exomes_NFE_AF,gnomAD_exomes_NFE_AC -db ${dbnsfp} /dev/stdin | \
+  java -Xmx1g -jar \$SNPEFF_HOME/SnpSift.jar annotate  -info CNT ${cosmic} /dev/stdin > ${vcf.baseName}.snpEff.ann.vcf
+	
+  mv snpEff_summary.html ${vcf.baseName}.snpEff.summary.html
   """
+}
+
+if (params.verbose) snpeffReport = snpeffReport.view {
+  "snpEff report:\n\
+  File  : ${it.fileName}"
 }
 
 /*
@@ -213,8 +216,10 @@ def defineDirectoryMap() {
     'MapReads'         : "${params.outDir}/BAMfiles",
     'AddUMIs'          : "${params.outDir}/BAMfiles",
     'VariantCallingUMI': "${params.outDir}/VCFFiles",
-    'vep'              : "${params.outDir}/Annotation/VEP"
-  ]
+    'vep'              : "${params.outDir}/Annotation/VEP",
+    'snpeffReports'    : "${params.outDir}/Annotation/snpeffreports",
+    'snpeff'           : "${params.outDir}/Annotation/snpeff"
+      ]
 }
 
 def defineReferenceMap() {
@@ -228,6 +233,13 @@ def defineReferenceMap() {
     'genomeIndex'      : checkParamReturnFile("genomeIndex"),
     // BWA index files
     'bwaIndex'         : checkParamReturnFile("bwaIndex"),
+    // cosmic VCF with VCF4.1 header
+    'cosmic'           : checkParamReturnFile("cosmic"),
+    'cosmicIndex'      : checkParamReturnFile("cosmicIndex"),
+    // dbNSFP files
+    'dbnsfp'           : checkParamReturnFile("dbnsfp"),
+    'dbnsfpIndex'      : checkParamReturnFile("dbnsfpIndex")
+
   ]
 }
 
