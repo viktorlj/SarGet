@@ -101,12 +101,13 @@ process MapReads {
   readGroup = "@RG\\tID:${idSample}\\tPU:${idSample}\\tSM:${idSample}\\tLB:${idSample}\\tPL:illumina"
   // adjust mismatch penalty for tumor samples
   """
-  bwa mem -R \"${readGroup}\" -t ${task.cpus} -B 3 -M \
+  bwa mem -R \"${readGroup}\" -t ${task.cpus} -B 4 -A 1.0 -w 100 -k 19 -M \
   ${genomeFile} $reads | \
   samtools sort --threads ${task.cpus} -m 4G - > ${idSample}.bam
   bam trimBam ${idSample}.bam ${idSample}.standard.sorted.trimmed.bam 1
   samtools index ${idSample}.standard.sorted.trimmed.bam
   """
+
 }
 
 process AddUMIs {
@@ -124,13 +125,14 @@ process AddUMIs {
 
   script:
   """
-  java -Xmx10g -jar /AGeNT/LocatIt.jar -U -IB -b ${amplicons} -o ${idSample}.UMI.bam ${bam} ${indexRead}
+  java -Xmx10g -jar /AGeNT/LocatIt.jar -U -IB -m 2 -d 1 -q 25 -b ${amplicons} -o ${idSample}.UMI.bam ${bam} ${indexRead}
   samtools sort -o ${idSample}.UMI.sorted.bam ${idSample}.UMI.bam
   bam trimBam ${idSample}.UMI.sorted.bam ${idSample}.UMI.sorted.trimmed.bam 1
   samtools index ${idSample}.UMI.sorted.trimmed.bam
   """
 }
 
+ 
 
 process VariantCallingUMI {
  tag {idPatient}
@@ -148,13 +150,15 @@ output:
 
 //   High sens settings suggested by Illumina, no output right now
 //   dotnet /Pisces/5.2.7.47/Pisces_5.2.7.47/Pisces.dll -g ${piscesGenome} -bam ${bam} -i ${regions} -OutFolder . -MinVF 0.0005 -SSFilter false -MinBQ 65 -MaxVQ 100 -MinDepthFilter 500 -MinVQ 0 -VQFilter 20 -ReportNoCalls True -CallMNVs False -RMxNFilter 5,9,0.35 -MinDepth 5 -threadbychr true -gVCF false
-
+//  
 script:
   """
-  dotnet /Pisces/5.2.7.47/Pisces_5.2.7.47/Pisces.dll -CallMNVs false -g ${piscesGenome} -bam ${bam} -i ${regions} -OutFolder . -gVCF false -i ${regions}  -RMxNFilter 5,9,0.35
+  dotnet /Pisces/5.2.7.47/Pisces_5.2.7.47/Pisces.dll -CallMNVs false -g ${piscesGenome} -bam ${bam} -i ${regions} -OutFolder . -gVCF false -i ${regions} -RMxNFilter 5,9,0.35 -MinDepth 40 --minvq 20 -MinVF 0.005
   """
 
 }
+
+// Adjust this to VEP and compatible downstream processing with python script (needs to be rebuilt for Pisces output)
 
 process RunSnpeff {
   tag {idPatient}
