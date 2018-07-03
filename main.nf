@@ -147,10 +147,6 @@ input:
 output:
   set idPatient, idSample, file("${idSample}.UMI.sorted.trimmed.vcf") into variantsUMI
 
-
-//   High sens settings suggested by Illumina, no output right now
-//   dotnet /Pisces/5.2.7.47/Pisces_5.2.7.47/Pisces.dll -g ${piscesGenome} -bam ${bam} -i ${regions} -OutFolder . -MinVF 0.0005 -SSFilter false -MinBQ 65 -MaxVQ 100 -MinDepthFilter 500 -MinVQ 0 -VQFilter 20 -ReportNoCalls True -CallMNVs False -RMxNFilter 5,9,0.35 -MinDepth 5 -threadbychr true -gVCF false
-//  
 script:
   """
   dotnet /Pisces/5.2.7.47/Pisces_5.2.7.47/Pisces.dll -CallMNVs false -g ${piscesGenome} -bam ${bam} -i ${regions} -OutFolder . -gVCF false -i ${regions} -RMxNFilter 5,9,0.35 -MinDepth 40 --minvq 20 -MinVF 0.005
@@ -158,8 +154,91 @@ script:
 
 }
 
+process RunVEP {
+  tag {"${vcf}"}
+
+    publishDir "${directoryMap.vep}", mode: 'link'
+
+  input:
+    set idPatient, idSample, file(vcf) from variantsUMI
+
+  output:
+    file("${vcf.simpleName}_VEP.summary.html") into vepReport
+    set idPatient, idSample, file("${vcf.simpleName}_VEP.ann.vcf") into vepVCF
+
+
+  script:
+  genome = params.genome == 'smallGRCh37' ? 'GRCh37' : params.genome
+  """
+  vep \
+  -i ${vcf} \
+  -o ${vcf.simpleName}_VEP.ann.vcf \
+  --assembly ${genome} \
+  --cache \
+  --cache_version 91 \
+  --dir_cache /opt/vep/.vep/ \
+  --database \
+  --everything \
+  --fork ${task.cpus} \
+  --format vcf \
+  --offline \
+  --per_gene \
+  --stats_file ${vcf.simpleName}_VEP.summary.html \
+  --total_length \
+  --vcf
+  """
+}
+
+process siftAddCosmic {
+    tag {vcf}
+
+    input:
+       set idPatient, idSample, file(vcf) from vepVCF
+       set file(cosmic), file(cosmicIndex) from Channel.value([
+       referenceMap.cosmic,
+       referenceMap.cosmicIndex,
+    ])
+    
+    output:
+        set idPatient, idSample, file("${vcf.baseName}.cosmic.ann.vcf") into filteredcosmicvcf
+
+    script:
+    """
+    java -Xmx4g \
+	  -jar \$SNPEFF_HOME/SnpSift.jar \
+	  annotate \
+	  -info CNT \
+    ${cosmic} \
+	  ${vcf} \
+	  > ${vcf.baseName}.cosmic.ann.vcf
+    """
+
+}
+
+process finishVCF {
+    tag {vcf}
+
+    publishDir directoryMap.txtAnnotate, mode: 'link'
+
+    input:
+        set idPatient, idSample, file(vcf) from filteredcosmicvcf
+
+    output:
+        file("${vcf.baseName}.anno.txt") into finishedFile
+
+    script:
+    """
+    pyenv global 3.6.3
+    eval "\$(pyenv init -)"
+    pisces2pandas.py -i ${vcf} -s ${idSample} -o ${vcf.baseName}.anno.txt
+    """ 
+
+}
+
+
 // Adjust this to VEP and compatible downstream processing with python script (needs to be rebuilt for Pisces output)
 
+/*
 process RunSnpeff {
   tag {idPatient}
 
@@ -194,6 +273,7 @@ if (params.verbose) snpeffReport = snpeffReport.view {
   "snpEff report:\n\
   File  : ${it.fileName}"
 }
+*/
 
 /*
 ================================================================================
@@ -222,7 +302,8 @@ def defineDirectoryMap() {
     'VariantCallingUMI': "${params.outDir}/VCFFiles",
     'vep'              : "${params.outDir}/Annotation/VEP",
     'snpeffReports'    : "${params.outDir}/Annotation/snpeffreports",
-    'snpeff'           : "${params.outDir}/Annotation/snpeff"
+    'snpeff'           : "${params.outDir}/Annotation/snpeff",
+    'txtAnnotate'      : "${params.outDir}/Annotation/txtAnnotate"
       ]
 }
 
