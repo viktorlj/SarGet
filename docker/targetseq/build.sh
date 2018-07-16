@@ -6,6 +6,7 @@ BCFTOOLS_VERSION=1.5
 BWA_VERSION=0.7.16
 HTSLIB_VERSION=1.5
 SAMTOOLS_VERSION=1.5
+SAMBAMBA_VERSION=0.6.7
 
 # Install libraries
 apt-get update && apt-get install -y --no-install-recommends \
@@ -38,6 +39,13 @@ apt-get install -y --no-install-recommends dotnet-sdk-2.1
 
 # Install tools
 mkdir /build
+
+# Install sambamba
+cd /build
+wget --quiet -O sambamba-${SAMBAMBA_VERSION}.tar.bz2 \
+  https://github.com/biod/sambamba/releases/download/v0.6.7/sambamba_v0.6.7_linux.tar.bz2
+tar xfj sambamba-${SAMBAMBA_VERSION}.tar.bz2
+cp sambamba /usr/local/bin/sambamba
 
 # Install BWA
 cd /build

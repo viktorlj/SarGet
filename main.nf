@@ -132,7 +132,25 @@ process AddUMIs {
   """
 }
 
- 
+process coverage_analysis_standard{
+    tag {idSample}
+
+    publishDir directoryMap.coverage, mode: 'link'
+
+    input:
+      set idPatient, idSample, file(bam), file(bai) from trimmed_StandardBAM
+      file(regions) from Channel.value(regionsFile)
+
+    output:
+      file("${idSample}.standard.coverage.txt") into finishedFile
+
+    script:
+    """
+    sambamba depth region --filter 'mapping_quality > 20' -q 20 -T 10 -T 50 -T 100 -T 500 -T 1000 -L ${regions} -o ${idSample}.rawcoverage.txt ${bam}
+    ParseSamCoverage.py -i ${idSample}.rawcoverage.txt -o ${idSample}.standard.coverage.txt
+    """
+}
+
 
 process VariantCallingUMI {
  tag {idPatient}
@@ -215,6 +233,7 @@ process siftAddCosmic {
 
 }
 
+//change to output idsample as file name instead
 process finishVCF {
     tag {vcf}
 
@@ -224,56 +243,16 @@ process finishVCF {
         set idPatient, idSample, file(vcf) from filteredcosmicvcf
 
     output:
-        file("${vcf.baseName}.anno.txt") into finishedFile
+        file("${idSample}.anno.txt") into finishedFile
 
     script:
     """
     pyenv global 3.6.3
     eval "\$(pyenv init -)"
-    pisces2pandas.py -i ${vcf} -s ${idSample} -o ${vcf.baseName}.anno.txt
+    pisces2pandas.py -i ${vcf} -s ${idSample} -o ${idSample}.anno.txt
     """ 
 
 }
-
-
-// Adjust this to VEP and compatible downstream processing with python script (needs to be rebuilt for Pisces output)
-
-/*
-process RunSnpeff {
-  tag {idPatient}
-
-  publishDir params.outDir , saveAs: { it == "${vcf.baseName}.snpEff.csv" ? "${directoryMap.snpeffReports}/${it}" : "${directoryMap.snpeff}/${it}" }, mode: 'link'
-
-  input:
-    set idPatient, idSample, file(vcf) from variantsUMI
-    val snpeffDb from Channel.value(params.genomes[params.genome].snpeffDb)
-    set file(cosmic), file(cosmicIndex), file(dbnsfp), file(dbnsfpIndex) from Channel.value([
-      referenceMap.cosmic,
-      referenceMap.cosmicIndex,
-      referenceMap.dbnsfp,
-      referenceMap.dbnsfpIndex
-    ])
-
-
-  output:
-    set file("${vcf.baseName}.snpEff.ann.vcf"), file("${vcf.baseName}.snpEff.genes.txt"), file("${vcf.baseName}.snpEff.csv"), file("${vcf.baseName}.snpEff.summary.html") into snpeffReport
-		file("${vcf.baseName}.snpEff.ann.vcf") into snpEffOutputVCFs
-
-    script:
-  """
-  java -Xmx4g -jar \$SNPEFF_HOME/snpEff.jar ${snpeffDb} -csvStats ${vcf.baseName}.snpEff.csv -nodownload -canon -v ${vcf} | \
-  java -jar \$SNPEFF_HOME/SnpSift.jar dbnsfp -v -f phastCons100way_vertebrate,1000Gp3_EUR_AF,gnomAD_exomes_NFE_AF,gnomAD_exomes_NFE_AC -db ${dbnsfp} /dev/stdin | \
-  java -Xmx1g -jar \$SNPEFF_HOME/SnpSift.jar annotate  -info CNT ${cosmic} /dev/stdin > ${vcf.baseName}.snpEff.ann.vcf
-	
-  mv snpEff_summary.html ${vcf.baseName}.snpEff.summary.html
-  """
-}
-
-if (params.verbose) snpeffReport = snpeffReport.view {
-  "snpEff report:\n\
-  File  : ${it.fileName}"
-}
-*/
 
 /*
 ================================================================================
@@ -303,7 +282,8 @@ def defineDirectoryMap() {
     'vep'              : "${params.outDir}/Annotation/VEP",
     'snpeffReports'    : "${params.outDir}/Annotation/snpeffreports",
     'snpeff'           : "${params.outDir}/Annotation/snpeff",
-    'txtAnnotate'      : "${params.outDir}/Annotation/txtAnnotate"
+    'txtAnnotate'      : "${params.outDir}/Annotation/txtAnnotate",
+    'coverage'      : "${params.outDir}/Annotation/Coverage"
       ]
 }
 
