@@ -1,8 +1,0 @@
-Ideas
-
-Sarget
-
-Three workflows
-1. Haloplex HS
-2. Haloplex standard
-3. WES alignment
