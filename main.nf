@@ -254,7 +254,6 @@ process siftAddCosmic {
 
 }
 
-//change to output idsample as file name instead
 process finishVCF {
     tag {vcf}
 
