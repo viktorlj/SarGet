@@ -50,7 +50,7 @@ process RunFastQC {
   publishDir "${directoryMap.fastQC}/${idSample}", mode: 'link'
 
   input:
-    set idPatient, idSample, file(fastqFile1), file(fastqFile2) from fastqFilesforFastQC
+    set idPatient, idSample, file(fastqFile1), file(fastqFile2), file(fastqFile3) from fastqFilesforFastQC
 
   output:
     file "*_fastqc.{zip,html}" into fastQCreport
@@ -70,11 +70,11 @@ process TrimReads {
   tag {idPatient}
 
   input:
-    set idPatient, idSample, file(fastqFile1), file(fastqFile2) from fastqFiles
+    set idPatient, idSample, file(fastqFile1), file(fastqFile2), file(fastqFile3) from fastqFiles
 
   output:
     file "*fastq.gz" into trimmed_reads
-    set idPatient, idSample into trim_output
+    set idPatient, idSample, file(fastqFile3) into trim_output
 
   script:
   """
@@ -86,15 +86,15 @@ process TrimReads {
 process MapReads {
   tag {idPatient}
 
-  publishDir "${directoryMap.MapReads}/${idSample}", mode: 'link', pattern: '*trimmed.bam*'
+  publishDir "${directoryMap.MapReads}", mode: 'link', pattern: '*trimmed.bam*'
   
   input:
-    set idPatient, idSample from trim_output
+    set idPatient, idSample, file(fastqFile3) from trim_output
     file reads from trimmed_reads
     set file(genomeFile), file(bwaIndex) from Channel.value([referenceMap.genomeFile, referenceMap.bwaIndex])
 
   output:
-    set idPatient, idSample, file("${idSample}.bam") into mappedBam
+    set idPatient, idSample, file("${idSample}.bam"), file(fastqFile3) into mappedBam
     set idPatient, idSample, file("${idSample}.standard.sorted.trimmed.bam"), file("${idSample}.standard.sorted.trimmed.bam.bai")  into trimmed_StandardBAM
 
   script:
@@ -113,11 +113,10 @@ process MapReads {
 process AddUMIs {
   tag {idPatient}
 
-  publishDir "${directoryMap.AddUMIs}/${idSample}", mode: 'link'
+  publishDir "${directoryMap.AddUMIs}", mode: 'link'
 
   input:
-    set idPatient, idSample, file(bam) from mappedBam
-    file indexRead from indexRead_file
+    set idPatient, idSample, file(bam), file(fastqFile3) from mappedBam
     file(amplicons) from Channel.value(ampliconFile)
 
   output:
@@ -125,33 +124,32 @@ process AddUMIs {
 
   script:
   """
-  java -Xmx10g -jar /AGeNT/LocatIt.jar -U -IB -m 2 -d 1 -q 25 -b ${amplicons} -o ${idSample}.UMI.bam ${bam} ${indexRead}
+  java -Xmx10g -jar /AGeNT/LocatIt.jar -U -IB -m 2 -d 1 -q 25 -b ${amplicons} -o ${idSample}.UMI.bam ${bam} ${fastqFile3}
   samtools sort -o ${idSample}.UMI.sorted.bam ${idSample}.UMI.bam
   bam trimBam ${idSample}.UMI.sorted.bam ${idSample}.UMI.sorted.trimmed.bam 1
   samtools index ${idSample}.UMI.sorted.trimmed.bam
   """
 }
 
-(trimmed_umiBAM, trimmed_umiBAM_forcoverage) = trimmed_umiBAM.into(2)
+// No coverage analysis at the moment
+// (trimmed_umiBAM, trimmed_umiBAM_forcoverage) = trimmed_umiBAM.into(2)
 
 process VariantCallingUMI {
- tag {idPatient}
+  tag {idSample}
 
-publishDir "${directoryMap.VariantCallingUMI}/${idSample}", mode: 'link'
+  publishDir "${directoryMap.VariantCallingUMI}", mode: 'link'
+  
+  input:
+    set idPatient, idSample, file(bam), file(bai) from trimmed_umiBAM
+    file piscesGenome from Channel.value(referenceMap.PiscesReference)
+    file regionsFile
 
-input:
-  set idPatient, idSample, file(bam), file(bai) from trimmed_umiBAM
-  file(piscesGenome) from Channel.fromPath(params.genome_base)
-  file(regions) from Channel.value(regionsFile)
-
-output:
-  set idPatient, idSample, file("${idSample}.UMI.sorted.trimmed.vcf") into variantsUMI
-
-script:
+  output:
+    set idPatient, idSample, file("${idSample}.UMI.sorted.trimmed.vcf") into variantsUMI
+  script:
   """
-  dotnet /Pisces/5.2.7.47/Pisces_5.2.7.47/Pisces.dll -CallMNVs false -g ${piscesGenome} -bam ${bam} -i ${regions} -OutFolder . -gVCF false -i ${regions} -RMxNFilter 5,9,0.35 -MinDepth 40 --minvq 20 -MinVF 0.005
+  dotnet /Pisces/5.2.7.47/Pisces_5.2.7.47/Pisces.dll -CallMNVs false -g $piscesGenome -bam $bam -i $regionsFile -OutFolder . -gVCF false -i $regionsFile -RMxNFilter 5,9,0.35 -MinDepth 40 --minvq 20 -MinVF 0.005
   """
-
 }
 
 process RunVEP {
@@ -175,8 +173,6 @@ process RunVEP {
   -o ${vcf.simpleName}_VEP.ann.vcf \
   --assembly ${genome} \
   --cache \
-  --cache_version 91 \
-  --dir_cache /opt/vep/.vep/ \
   --database \
   --everything \
   --fork ${task.cpus} \
@@ -218,8 +214,8 @@ process siftAddCosmic {
 process finishVCF {
     tag {vcf}
 
-    publishDir directoryMap.txtAnnotate, mode: 'link'
-
+    publishDir "${directoryMap.txtAnnotate}", mode: 'link'
+    
     input:
         set idPatient, idSample, file(vcf) from filteredcosmicvcf
 
@@ -228,9 +224,6 @@ process finishVCF {
 
     script:
     """
-    
-    eval "\$(pyenv init -)"
-    pyenv global 3.6.3
     pisces2pandas.py -i ${vcf} -s ${idSample} -o ${idSample}.anno.txt
     """ 
 
@@ -280,6 +273,8 @@ def defineReferenceMap() {
     'genomeIndex'      : checkParamReturnFile("genomeIndex"),
     // BWA index files
     'bwaIndex'         : checkParamReturnFile("bwaIndex"),
+    // Pisces files
+    'PiscesReference'  : checkParamReturnFile("PiscesReference"),
     // cosmic VCF with VCF4.1 header
     'cosmic'           : checkParamReturnFile("cosmic"),
     'cosmicIndex'      : checkParamReturnFile("cosmicIndex"),
@@ -301,14 +296,17 @@ def extractFastq(tsvFile) {
       def idSample   = list[1]
       def fastqFile1 = returnFile(list[2])
       def fastqFile2 = returnFile(list[3])
+      def fastqFile3 = returnFile(list[4])
 
       checkFileExtension(fastqFile1,".fastq.gz")
       checkFileExtension(fastqFile2,".fastq.gz")
+      checkFileExtension(fastqFile3,".fastq.gz")
 
-      [idPatient, idSample, fastqFile1, fastqFile2]
+      [idPatient, idSample, fastqFile1, fastqFile2, fastqFile3]
     }
 }
 
+// Obsolete - remove?
 def extractUMIRead(tsvFile) {
   // Channeling the TSV file containing FASTQ.
   // Format is: "subject sample lane fastq1 fastq2 UMIread"
