@@ -6,46 +6,43 @@ BCFTOOLS_VERSION=1.5
 BWA_VERSION=0.7.16
 HTSLIB_VERSION=1.5
 SAMTOOLS_VERSION=1.5
-SAMBAMBA_VERSION=0.6.7
 
 # Install libraries
-apt-get update && apt-get install -y --no-install-recommends \
-  build-essential \
+apk update && apk add \
+  alpine-sdk \
   bzip2 \
   ca-certificates \
+  curl-dev \
   g++ \
   gcc \
   git \
-  libbz2-dev \
-  liblzma-dev \
-  libncurses5-dev \
-  libncursesw5-dev \
-  libssl-dev \
+  gnupg \
+  bzip2-dev \
+  xz-dev \
+  ncurses-dev \
+  openssl-dev \
   make \
   python \
   python3 \
   unzip \
   wget \
-  zlib1g-dev
-
-# Install dotnet
-wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > microsoft.asc.gpg
-mv microsoft.asc.gpg /etc/apt/trusted.gpg.d/
-wget -q https://packages.microsoft.com/config/debian/8/prod.list
-mv prod.list /etc/apt/sources.list.d/microsoft-prod.list
-apt-get install -y --no-install-recommends apt-transport-https
-apt-get update
-apt-get install -y --no-install-recommends dotnet-sdk-2.1
+  zlib-dev
 
 # Install tools
 mkdir /build
 
-# Install sambamba
+# Install BBduk
 cd /build
-wget --quiet -O sambamba-${SAMBAMBA_VERSION}.tar.bz2 \
-  https://github.com/biod/sambamba/releases/download/v0.6.7/sambamba_v0.6.7_linux.tar.bz2
-tar xfj sambamba-${SAMBAMBA_VERSION}.tar.bz2
-cp sambamba /usr/local/bin/sambamba
+wget --quiet https://kent.dl.sourceforge.net/project/bbmap/BBMap_38.44.tar.gz
+tar xvfz BBMap_38.44.tar.gz
+mkdir /bbmap
+mv bbmap/* /bbmap
+
+# Install fgbio
+cd /build
+wget --quiet https://github.com/fulcrumgenomics/fgbio/releases/download/0.8.1/fgbio-0.8.1.jar
+mkdir /fgbio
+mv fgbio-0.8.1.jar /fgbio/
 
 # Install BWA
 cd /build
@@ -64,6 +61,14 @@ rm htslib-${HTSLIB_VERSION}.tar.bz2
 cd htslib-${HTSLIB_VERSION}
 ./configure --prefix=/opt/htslib
 make && make install
+
+# Install pindel
+cd /build
+git clone https://github.com/genome/pindel.git
+cd pindel
+./INSTALL /opt/htslib/
+mkdir /pindel
+mv /build/pindel/* /pindel/
 
 # Install BCFtools
 cd /build
@@ -85,18 +90,12 @@ cd samtools-${SAMTOOLS_VERSION}
 ./configure --prefix=/opt/samtools
 make && make install
 
-#Install libStatGen
+#Install primerclip (specific for Swift data)
 cd /build
-git clone https://github.com/statgen/libStatGen.git libStatGen
-cd libStatGen
-make
-
-#Install bam-utils
-cd /build
-git clone https://github.com/statgen/bamUtil.git bamUtil
-cd bamUtil
-make all
-cp bin/bam /usr/local/bin/bam
+git clone https://github.com/swiftbiosciences/primerclip primerclip
+cd primerclip
+mkdir /primerclip
+cp .stack-work/install/x86_64-linux/lts-11.0/8.2.2/bin/primerclip /primerclip/
 
 #Install Agent toolkit
 cd /build
@@ -107,28 +106,14 @@ mkdir /AGeNT
 mv LocatIt_v4.0.1.jar /AGeNT/LocatIt.jar
 mv SurecallTrimmer_v4.0.1.jar /AGeNT/SurecallTrimmer.jar
 
-# Install Pisces suite
+# Install lofreq
 cd /build
-git clone https://github.com/Illumina/Pisces.git Pisces
-cd Pisces
-mkdir /Pisces/
-cp -r binaries/5.2.7.47 /Pisces/
-cd /Pisces/5.2.7.47
-for a in `ls -1 *.tar.gz`; do tar -zxvf $a; done
+wget --quiet https://github.com/CSB5/lofreq/raw/master/dist/lofreq_star-2.1.3.1_linux-x86-64.tgz
+tar xvfz lofreq_star-2.1.3.1_linux-x86-64.tgz
+mkdir /lofreq
+mv lofreq_star-2.1.3.1/bin/* /lofreq
 
 # Clean up install
 cd /
-apt-get remove -y \
-  build-essential \
-  ca-certificates \
-  gcc \
-  git \
-  libbz2-dev \
-  liblzma-dev \
-  libncurses5-dev \
-  libncursesw5-dev \
-  unzip \
-  wget \
-  zlib1g-dev
-apt-get clean
+
 rm -rf /build /var/lib/apt/lists/* /opt/get-pip.py

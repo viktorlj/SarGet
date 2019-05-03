@@ -1,4 +1,4 @@
-FROM davidcaste/debian-oracle-java:latest
+FROM davidcaste/alpine-java-unlimited-jce:latest
 
 LABEL \
   author="Viktor Ljungström" \
@@ -14,3 +14,5 @@ ADD \
   build.sh /usr/bin/
 RUN \
   build.sh
+
+CMD ["/bin/bash"]
